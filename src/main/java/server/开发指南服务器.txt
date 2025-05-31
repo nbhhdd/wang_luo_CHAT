@@ -1,0 +1,284 @@
+ 🧾 Java Socket 聊天程序服务端开发日志
+
+📌 项目目标
+
+开发一个基于 TCP Socket 的多用户聊天服务器，实现以下功能：
+
+* 支持用户注册、登录（用户名唯一）
+* 在线用户列表同步
+* 群聊（广播消息）
+* 私聊（通过协议 @用户名 实现）
+* 用户上下线通知
+* 用户注册信息本地持久化（users.txt）
+
+
+ 🗂️ 项目结构（服务端）
+src/
+└── server/
+    ├── ChatServer.java         // 主服务器类，监听端口，接收连接
+    ├── ClientHandler.java      // 客户端处理线程，处理登录、消息、注册等
+    └── users.txt               // 注册用户信息（用户名:密码）
+🧱 开发步骤日志
+第 1 步：搭建基本 Socket 服务端结构
+
+文件：`ChatServer.java`
+
+* 创建一个 `ServerSocket` 监听端口（如 12345）
+* 接收到客户端连接后，为其创建一个 `ClientHandler` 线程处理通信
+* 使用 `ConcurrentHashMap<String, ClientHandler>` 管理所有在线用户（用户名作为 key）
+java
+   try (ServerSocket serverSocket = new ServerSocket(PORT)) {
+            while (true) {
+//                调用 accept() 方法，阻塞等待客户端连接。
+//                一旦有客户端连接成功，就会返回一个 Socket 对象，表示与该客户端的通信通道。
+                Socket clientSocket = serverSocket.accept();
+                System.out.println("新连接: " + clientSocket.getInetAddress());
+//                为每个新连接的客户端创建一个新的线程，并传入 ClientHandler 处理器。
+//                ClientHandler 是一个实现了 Runnable 接口的类，负责处理该客户端的所有消息收发逻辑。
+//                clients 是一个共享的在线用户列表（Map），用于广播消息或管理用户状态。
+                //为新用户创建线程
+                new Thread(new ClientHandler(clientSocket, clients)).start();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+第 2 步：实现 ClientHandler 基础通信处理逻辑
+
+文件：`ClientHandler.java`
+建立基本属性
+    // 客户端与服务器通信的Socket连接
+    private Socket socket;
+
+    // 输入流，用于读取客户端发送的消息
+    private BufferedReader reader;
+
+    // 输出流，用于向客户端发送消息
+    private PrintWriter writer;
+
+    // 当前客户端的用户名（登录成功后赋值）
+    private String username;
+    // 用于存储所有在线用户
+    private Map<String, ClientHandler> clients;
+
+    // 改为绝对路径，确保打包运行时仍能找到文件
+    // 设置用户信息保存路径为当前工作目录下的 users.txt
+    private static final String USER_FILE = System.getProperty("user.dir") + File.separator + "users.txt";
+
+    // 用于存储所有注册过的用户和密码（注册时写入，登录时读取验证）
+    private static Map<String, String> userDatabase = new ConcurrentHashMap<>();
+//    ConcurrentHashMap 是线程安全的集合，用于多线程环境。
+//    System.getProperty("user.dir") 表示程序启动时所在目录
+
+    // 加载用户数据
+    static {
+        loadUserDatabase();
+    }
+* 为每个连接的客户端：
+
+  * 建立输入输出流
+  * 读取第一行判断是否为注册或登录请求
+  * 验证登录信息或处理注册，反馈 SUCCESS/失败原因
+
+第 3 步：实现用户注册功能
+
+* 客户端通过 `"REGISTER:用户名:密码"` 发送请求
+* 服务端解析后：
+
+  * 检查用户名是否存在（查内存 map）
+  * 如果不存在，则保存到内存 map，并追加写入 `users.txt`
+  * 否则返回“用户名已存在”
+调用handleRegister(line)
+
+  private void handleRegister(String line) {
+        String[] parts = line.split(":", 3);
+        if (parts.length < 3) {
+            writer.println("注册格式错误");
+            return;
+        }
+
+        String uname = parts[1];
+        String pwd = parts[2];
+
+        if (userDatabase.containsKey(uname)) {
+            writer.println("用户名已存在");
+        } else {
+            userDatabase.put(uname, pwd);
+            saveUserToFile(uname, pwd);
+            writer.println("SUCCESS");
+            System.out.println("注册成功: " + uname);
+        }
+    }
+ 第 4 步：实现用户登录验证功能
+
+* 客户端通过 `"LOGIN:用户名:密码"` 请求登录
+* 服务端检查是否存在用户，密码是否正确，是否已经在线
+调用handleLogin(line)
+    private boolean handleLogin(String line) {
+        String[] parts = line.split(":", 3);
+        if (parts.length < 3) {
+            writer.println("登录格式错误");
+            return false;
+        }
+
+        String uname = parts[1];
+        String pwd = parts[2];
+
+        if (!userDatabase.containsKey(uname)) {
+            writer.println("用户未注册");
+            return false;
+        }
+
+        if (!userDatabase.get(uname).equals(pwd)) {
+            writer.println("密码错误");
+            return false;
+        }
+
+        if (clients.containsKey(uname)) {
+            writer.println("该用户已在线");
+            return false;
+        }
+
+        this.username = uname;
+        //存放上线的人
+        登录成功后，将该 `ClientHandler` 实例添加到 `clients` 在线列表中。
+        clients.put(username, this);
+        writer.println("SUCCESS");
+        return true;
+    }
+  //处理注册
+            if (line.startsWith("REGISTER:")) {
+                handleRegister(line);
+                return;
+
+                //登录
+            } else if (line.startsWith("LOGIN:")) {
+                if (!handleLogin(line)) return; // 登录失败直接断开
+            } else {
+                writer.println("非法请求格式");
+                return;
+            }
+
+
+
+ 第 5 步：广播上线通知 + 同步在线用户列表
+ //服务器向每个客户端发送消息
+broadcast("[系统] " + username + " 已上线");
+    private void broadcast(String message) {
+        for (ClientHandler client : clients.values()) {
+//            遍历全局变量 clients 中的所有在线用户（每个用户对应一个 ClientHandler 实例）。
+//            clients 是一个线程安全的 ConcurrentHashMap<String, ClientHandler>，键是用户名，值是对应的客户端处理器。
+            //展示区域消息
+            client.writer.println(message);
+//            获取每个客户端的输出流（PrintWriter），并向其发送消息。
+//            每个客户端收到该消息后会在界面上显示出来。
+        }
+    }
+    同步用户在线列表
+updateUserList();
+    private void updateUserList() {
+//        创建一个 StringBuilder 实例，用于高效拼接字符串。
+        StringBuilder sb = new StringBuilder();
+//        遍历全局变量 clients 的键集合（即所有在线用户名）。
+//        将每个用户名追加到 StringBuilder 后面，并加上逗号 , 分隔符。
+//        示例输出：Alice,Bob,Charlie,
+        for (String user : clients.keySet()) {
+            sb.append(user).append(",");
+        }
+        if (!sb.isEmpty()) sb.setLength(sb.length() - 1);
+//        如果 StringBuilder 不为空，则删除最后一个多余的逗号。
+//        示例变成：Alice,Bob,Charlie
+
+//        遍历所有在线客户端的处理对象 ClientHandler。
+//        通过每个客户端的输出流 PrintWriter 发送格式为 [USERLIST]Alice,Bob,Charlie 的消息。
+//        客户端收到这个消息后会解析并更新界面上的在线用户列表。
+        for (ClientHandler client : clients.values()) {
+            client.writer.println("[USERLIST]" + sb);
+        }
+    }
+* 所有在线用户通过协议 `[USERLIST]user1,user2,...` 同步显示在线用户列表
+### 第 6 步：实现群聊功能
+* 客户端发送 `[GROUP]消息内容`
+* 服务端截取后通过 `broadcast()` 方法群发到所有在线用户
+broadcast(username + ": " + msg);
+
+### 第 7 步：实现私聊功能
+
+* 客户端发送 `[PRIVATE]sender:receiver:message`
+* 服务端解析 sender、receiver，找到目标用户 `ClientHandler`
+* 单独向目标发送 `[私聊]sender:message`
+
+ private void handlePrivateMessage(String body) {
+        String[] parts = body.split(":", 3);
+        if (parts.length < 3) return;
+
+        String sender = parts[0];
+        String receiver = parts[1];
+        String content = parts[2];
+        //找到目标用户
+        ClientHandler target = clients.get(receiver);
+        if (target != null) {
+            target.writer.println("[私聊] " + sender + ": " + content);
+        } else {
+            writer.println("[系统] 用户 " + receiver + " 不在线。");
+        }
+    }
+
+### 第 8 步：处理下线和异常连接断开
+
+* 在线程 `finally` 中移除该用户的在线状态
+* 广播用户下线通知
+* 同步用户列表
+
+finally {
+            if (username != null) {
+                //下线
+                clients.remove(username);
+                //向每个客户端打印
+                broadcast("[系统] " + username + " 已下线");
+                //更新 用户列表
+                updateUserList();
+            }
+
+第 9 步：用户数据持久化
+
+* 注册成功后追加写入 `users.txt` 文件
+* 程序启动时，通过静态代码块 `loadUserDatabase()` 加载历史注册用户
+
+java
+static {
+    loadUserDatabase(); // 初次加载注册数据
+}
+
+
+## ✅ 已完成的协议设计
+
+| 功能   | 客户端发送            | 服务端响应                      |
+| ---- | ---------------- | -------------------------- |
+| 注册   | REGISTER:用户名:密码  | SUCCESS / 用户名已存在           |
+| 登录   | LOGIN:用户名:密码     | SUCCESS / 错误信息             |
+| 群聊   | \[GROUP]消息       | 用户名: 消息                    |
+| 私聊   | \[PRIVATE]发:收:内容 | \[私聊]发: 内容 或 用户不在线提示       |
+| 用户列表 | ——               | \[USERLIST]user1,user2,... |
+| 上线通知 | ——               | \[系统] 用户名 已上线              |
+| 下线通知 | ——               | \[系统] 用户名 已下线              |
+
+---
+
+## 📌 注意事项与后续优化建议
+
+| 问题/限制    | 当前做法             | 建议改进               |
+| -------- | ---------------- | ------------------ |
+| 并发读写用户数据 | 同步块 synchronized | 将来可用数据库替代          |
+| 私聊用户不在线  | 显示“用户不在线”        | 可添加离线消息缓存          |
+| 用户验证安全性  | 明文密码，简单文本存储      | 可使用密码加密（如 SHA-256） |
+| 消息广播效率   | 循环所有连接           | 可加入线程池管理优化资源       |
+
+---
+
+## 🏁 项目运行说明
+
+* 启动 `ChatServer.java`，监听 12345 端口
+* 客户端通过 TCP Socket（或 UI）连接，发送登录/注册请求
+* 支持多个客户端并发连接、消息通信
+
+如你后续准备打包项目，可以将以上日志保存为 `docs/server-development-log.md`，作为项目文档留存。

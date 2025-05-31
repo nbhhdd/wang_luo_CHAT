@@ -77,8 +77,4 @@ public class PrivateChatFrame extends JFrame {
         }
     }
 
-    public void receiveMessage(String msg) {
-        chatArea.append(receiver + ": " + msg + "\n");
-        chatArea.setCaretPosition(chatArea.getDocument().getLength()); // 滚动到底部
-    }
 }

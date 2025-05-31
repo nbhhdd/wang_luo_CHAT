@@ -6,9 +6,16 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ClientHandler implements Runnable {
+    // 客户端与服务器通信的Socket连接
     private Socket socket;
+
+    // 输入流，用于读取客户端发送的消息
     private BufferedReader reader;
+
+    // 输出流，用于向客户端发送消息
     private PrintWriter writer;
+
+    // 当前客户端的用户名（登录成功后赋值）
     private String username;
     // 用于存储所有在线用户
     private Map<String, ClientHandler> clients;

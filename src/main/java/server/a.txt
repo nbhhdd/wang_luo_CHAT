@@ -1,0 +1,158 @@
+客户端与服务端的联系与运行是通过 **Java Socket 网络通信机制** 实现的。你这个聊天程序采用了经典的 **C/S（Client/Server）结构**，下面我详细解释他们之间是怎么联系、交互、运行的。
+
+---
+
+## 🔗 一、客户端与服务端的联系：Socket 连接
+
+### 🌐 核心机制：
+
+* 服务端使用 `ServerSocket` 监听端口，等待客户端连接。
+* 客户端使用 `Socket` 主动连接服务端。
+
+---
+
+### 🔧 服务端做了什么？
+
+代码片段来自 `ChatServer`：
+
+```java
+ServerSocket serverSocket = new ServerSocket(12345); // 监听12345端口
+Socket clientSocket = serverSocket.accept();         // 阻塞等待连接
+new Thread(new ClientHandler(clientSocket, clients)).start(); // 为每个客户端开线程处理
+```
+
+* **ServerSocket**：监听端口（12345）
+* **accept()**：一旦有客户端连接，请求就会被接收
+* **ClientHandler**：为每个客户端开一个线程进行独立通信（支持多人）
+
+---
+
+### 🧑‍💻 客户端做了什么？
+
+代码片段来自 `LoginFrame.handleLogin()`：
+
+```java
+Socket socket = new Socket("localhost", 12345); // 连接本地12345端口
+BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+
+out.println("LOGIN:" + username + ":" + password); // 发送登录请求
+String response = in.readLine();                   // 读取服务端响应
+```
+
+* `Socket("localhost", 12345)`：客户端连接服务端地址（127.0.0.1）和端口
+* 获取 `InputStream` 和 `OutputStream` 后，使用文本协议和服务端交互
+
+---
+
+## 🧭 二、运行过程和通信流程（从启动到消息收发）
+
+### 1. 服务端先启动
+
+```bash
+java -cp xxx.jar server.ChatServer
+```
+
+* 启动 `ServerSocket`
+* 等待客户端连接
+
+---
+
+### 2. 客户端启动并尝试登录
+
+```bash
+java -cp xxx.jar client.LoginFrame
+```
+
+* 用户输入用户名和密码，点击“登录”
+* 客户端用 `Socket` 连接到 `localhost:12345`
+* 发送登录指令，例如：
+
+```
+LOGIN:alice:123456
+```
+
+---
+
+### 3. 服务端接收到请求后：
+
+* 检查用户是否存在、密码是否正确、是否已经在线
+* 返回响应：`SUCCESS` 或 `失败原因`
+* 登录成功后将当前用户加入在线列表
+
+---
+
+### 4. 双方建立连接后，可以进行聊天：
+
+* 客户端发群聊信息：
+
+```java
+writer.println("[GROUP]你好");
+```
+
+* 服务端收到后，调用 `broadcast()` 向所有在线用户转发该消息
+
+---
+
+### 5. 私聊过程：
+
+客户端发出私聊消息协议：
+
+```
+[PRIVATE]alice:bob:你好
+```
+
+* 服务端解析后，从 `clients` 中找到 `bob`，单独转发
+
+---
+
+## 🔁 三、通信协议格式（你自己设计的）
+
+| 类型   | 协议格式                         | 示例                          |
+| ---- | ---------------------------- | --------------------------- |
+| 注册   | `REGISTER:username:password` | `REGISTER:alice:123456`     |
+| 登录   | `LOGIN:username:password`    | `LOGIN:alice:123456`        |
+| 群聊   | `[GROUP]内容`                  | `[GROUP]大家好`                |
+| 私聊   | `[PRIVATE]发送者:接收者:内容`        | `[PRIVATE]alice:bob:你好`     |
+| 在线用户 | `[USERLIST]用户1,用户2,...`      | `[USERLIST]alice,bob,carol` |
+| 系统通知 | `[系统]用户xxx已上线/下线`            | `[系统]bob 已上线`               |
+
+---
+
+## 🔐 四、线程模型
+
+* 每个客户端连接由服务端 `ClientHandler` 的一个线程负责处理
+* 客户端自己也开启一个线程持续监听服务端的消息
+
+这就保证了：
+
+* 服务端支持多个客户端同时在线
+* 客户端在不阻塞主界面的情况下接收消息
+
+---
+
+## 🎯 总结图示
+
+```plaintext
++------------+       Socket        +--------------+
+|  客户端 A  | <-----------------> |              |
+|            |                     |              |
+| ChatFrame  |                     | ChatServer   |
++------------+                     |  (监听12345) |
+                                   |              |
++------------+       Socket        |              |
+|  客户端 B  | <-----------------> |              |
++------------+                     +--------------+
+```
+
+---
+
+## 如果你要测试 ✅
+
+1. 先运行服务端（只运行一次）
+2. 再打开多个终端或窗口，运行多个客户端
+3. 用不同用户名登录后，可以互相聊天、私聊
+
+---
+
+如果你希望我画一个「通信流程图」或者输出一份完整的「聊天功能时序图」，也可以告诉我，我来为你补充。
